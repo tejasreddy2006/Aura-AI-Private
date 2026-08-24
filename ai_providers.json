@@ -1,0 +1,124 @@
+[
+  {
+    "name": "OpenRouter",
+    "baseURL": "https://openrouter.ai/api/v1",
+    "apiKey": "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",
+    "apiKeys": [
+      "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"
+    ],
+    "models": [
+      {
+        "modelName": "openai/gpt-oss-120b",
+        "description": "GPT-OSS 120B - primary bot model",
+        "requestParams": {
+          "provider": {
+            "only": [
+              "cerebras",
+              "groq"
+            ],
+            "sort": "throughput"
+          }
+        }
+      },
+      {
+        "modelName": "google/gemma-4-31b-it",
+        "description": "Gemma 4 31B"
+      }
+    ],
+    "visionModels": [
+      {
+        "modelName": "google/gemma-4-31b-it",
+        "description": "Gemma 4 31B Vision"
+      }
+    ],
+    "supportsVision": true,
+    "defaultModel": "openai/gpt-oss-120b",
+    "defaultVisionModel": "google/gemma-4-31b-it",
+    "maxImages": 4,
+    "defaultPrimary": true,
+    "defaultVisionPrimary": true
+  },
+
+  {
+    "name": "Gemini",
+    "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "apiKey": "AQ.Ab8RN6Kaaauz2sj2CQQmo0UAALmuXJd47cp95ThBFZvXIiHJ-w",
+    "apiKeys": [
+      "AQ.Ab8RN6Kaaauz2sj2CQQmo0UAALmuXJd47cp95ThBFZvXIiHJ-w"
+    ],
+    "models": [
+      {
+        "modelName": "gemini-3.5-flash-lite",
+        "description": "Gemini Flash Lite - secondary bot model"
+      },
+      {
+        "modelName": "gemini-3.6-flash",
+        "description": "Gemini Flash - accurate fallback"
+      }
+    ],
+    "visionModels": [
+      {
+        "modelName": "gemini-3.5-flash-lite",
+        "description": "Gemini Flash Lite Vision - secondary vision"
+      },
+      {
+        "modelName": "gemini-3.6-flash",
+        "description": "Gemini Flash Vision - accurate fallback"
+      }
+    ],
+    "supportsVision": true,
+    "defaultModel": "gemini-3.5-flash-lite",
+    "defaultVisionModel": "gemini-3.5-flash-lite",
+    "maxImages": 4,
+    "defaultSecondary": true,
+    "defaultVisionSecondary": true
+  },
+
+  {
+    "name": "Cerebras",
+    "baseURL": "https://api.cerebras.ai/v1",
+    "apiKey": "YOUR_CEREBRAS_API_KEY",
+    "apiKeys": [
+      "YOUR_CEREBRAS_API_KEY"
+    ],
+    "models": [
+      {
+        "modelName": "gpt-oss-120b",
+        "description": "GPT-OSS 120B"
+      },
+      {
+        "modelName": "gemma-4-31b",
+        "description": "Gemma 4 31B"
+      }
+    ],
+    "visionModels": [
+      {
+        "modelName": "gemma-4-31b",
+        "description": "Gemma 4 31B Vision"
+      }
+    ],
+    "supportsVision": true,
+    "defaultModel": "gpt-oss-120b",
+    "maxImages": 2
+  },
+
+  {
+    "name": "Groq",
+    "baseURL": "https://api.groq.com/openai/v1",
+    "apiKey": "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",
+    "apiKeys": [
+      "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"
+    ],
+    "models": [
+      {
+        "modelName": "openai/gpt-oss-120b",
+        "description": "GPT-OSS 120B"
+      },
+      {
+        "modelName": "openai/gpt-oss-20b",
+        "description": "GPT-OSS 20B"
+      }
+    ],
+    "supportsVision": false
+  }
+]
