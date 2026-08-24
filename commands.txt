@@ -1,0 +1,12 @@
+winget install Python.Python.3.13
+
+winget install --id Git.Git -e --source winget
+
+
+git clone https://github.com/tejasreddy2006/Aura-AI-Private.git
+
+
+python -m pip install --upgrade pip
+
+
+pip install -r requirements.txt
