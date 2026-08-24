@@ -16,85 +16,121 @@ let screenVideoTrack = null; // Store video track for screenshot reuse
 
 /**
  * Requests permission to use the microphone and populates the dropdown.
- * @returns {Promise<boolean>} True if permission was granted, false otherwise.
+ * @returns {Promise<{success: boolean, reason?: string, error?: any}>} Status object detailing microphone availability.
  */
 export async function setupMicrophone() {
     const micSelect = document.getElementById('mic-select');
     try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            if (micSelect) {
+                micSelect.innerHTML = '<option value="">Microphone Not Supported (Optional)</option>';
+                micSelect.disabled = true;
+            }
+            return { success: false, reason: 'not_supported' };
+        }
+
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         stream.getTracks().forEach(track => track.stop());
 
         const devices = await navigator.mediaDevices.enumerateDevices();
         const audioDevices = devices.filter(device => device.kind === 'audioinput');
 
-        if (audioDevices.length === 0) return false;
+        if (audioDevices.length === 0) {
+            if (micSelect) {
+                micSelect.innerHTML = '<option value="">No Microphone Available (Optional)</option>';
+                micSelect.disabled = true;
+            }
+            return { success: false, reason: 'no_devices' };
+        }
 
-        micSelect.innerHTML = '';
-        audioDevices.forEach(device => {
-            const option = document.createElement('option');
-            option.value = device.deviceId;
-            option.textContent = device.label || `Microphone ${micSelect.options.length + 1}`;
-            micSelect.appendChild(option);
-        });
-        
-        micSelect.disabled = false;
-        return true;
+        if (micSelect) {
+            micSelect.innerHTML = '';
+            audioDevices.forEach(device => {
+                const option = document.createElement('option');
+                option.value = device.deviceId;
+                option.textContent = device.label || `Microphone ${micSelect.options.length + 1}`;
+                micSelect.appendChild(option);
+            });
+            micSelect.disabled = false;
+        }
+        return { success: true };
     } catch (err) {
         devError("Error setting up microphone:", err);
-        return false;
+        if (micSelect) {
+            micSelect.innerHTML = '<option value="">Microphone Disabled / Unavailable (Optional)</option>';
+            micSelect.disabled = true;
+        }
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            return { success: false, reason: 'permission_denied', error: err };
+        }
+        return { success: false, reason: 'exception', error: err };
     }
 }
 
 /**
  * Starts audio processing by setting up the AudioContext, loading the worklet,
- * and connecting the audio streams.
- * @param {string} micId - The deviceId of the selected microphone.
+ * and connecting the audio streams. Microphone input is optional.
+ * @param {string} micId - The deviceId of the selected microphone (or empty if disabled/unavailable).
  * @param {function} onAudioData - Callback function to handle the processed PCM audio data.
  * @returns {Promise<boolean>} True if processing started successfully.
  */
 export async function startAudioProcessing(micId, onAudioData) {
     try {
-        // 1. Get Audio Streams
-        micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: micId } } });
-        systemStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        // 1. Get Microphone Stream (Optional)
+        micStream = null;
+        if (micId) {
+            try {
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: micId } } });
+            } catch (micErr) {
+                devWarn("⚠️ Could not acquire requested microphone stream, attempting fallback:", micErr);
+                try {
+                    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                } catch (fallbackErr) {
+                    devWarn("⚠️ Could not acquire microphone stream:", fallbackErr);
+                    micStream = null;
+                }
+            }
+        } else {
+            devLog("ℹ️ No microphone selected; proceeding without microphone input.");
+        }
 
-        if (!micStream || !systemStream) {
-            console.error("Could not get both audio streams.");
+        // 2. Get System Display Stream (Required for interviewer audio capture)
+        try {
+            systemStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+        } catch (sysErr) {
+            console.error("❌ Could not get system display stream:", sysErr);
             stopAudioProcessing();
             return false;
         }
 
-        // 2. Setup AudioContext and Worklet
-        // Pin the rate so it matches what Deepgram is told to expect. Left to
-        // itself the context adopts the hardware rate, and a 44.1kHz device
-        // then streams audio that Deepgram decodes as 48kHz (~9% fast), which
-        // degrades transcription in a way that looks like a Deepgram fault
-        // rather than a configuration mismatch.
+        if (!systemStream) {
+            console.error("Could not get system audio stream.");
+            stopAudioProcessing();
+            return false;
+        }
+
+        // 3. Setup AudioContext and Worklet
         const AudioCtx = window.AudioContext || window.webkitAudioContext;
         try {
             audioContext = new AudioCtx({ sampleRate: TARGET_SAMPLE_RATE });
         } catch (rateErr) {
-            // The spec requires 8000-96000 to be supported, so this is close to
-            // unreachable; fall back rather than failing the whole session.
             console.warn('⚠️ Could not pin AudioContext sample rate:', rateErr);
             audioContext = new AudioCtx();
         }
-        console.log(`🎵 AudioContext: ${audioContext.sampleRate}Hz`); // Keep this as it's important for debugging
+        console.log(`🎵 AudioContext: ${audioContext.sampleRate}Hz`);
         if (audioContext.sampleRate !== TARGET_SAMPLE_RATE) {
             console.warn(`⚠️ AudioContext is ${audioContext.sampleRate}Hz but Deepgram expects ${TARGET_SAMPLE_RATE}Hz - transcription accuracy may suffer`);
         }
         await audioContext.audioWorklet.addModule('/static/js/audio_processor.js');
         
-        // 3. Create a single mixed processor for better diarization
+        // 4. Create a single mixed processor
         const mixedProcessor = new AudioWorkletNode(audioContext, 'mixed-processor');
 
-        // Handle mixed audio with mute-aware speaker detection
-        let audioProcessingCounter = 0; // For throttled logging
+        let audioProcessingCounter = 0;
         
         mixedProcessor.port.onmessage = (event) => {
-            // If universally muted, drop all audio data immediately.
             if (muteManager.isAudioPaused()) {
-                if (audioProcessingCounter % 200 === 0) { // Log occasionally to show it's paused
+                if (audioProcessingCounter % 200 === 0) {
                     devLog(`⏸️ Audio processing paused due to universal mute.`);
                 }
                 audioProcessingCounter++;
@@ -104,12 +140,9 @@ export async function startAudioProcessing(micId, onAudioData) {
             const { audioData, micLevel, systemLevel } = event.data;
             let speakerHint;
 
-            if (muteManager.isMicrophoneMuted()) {
-                // When microphone is muted, all audio is from the interviewer.
+            if (!micStream || muteManager.isMicrophoneMuted()) {
                 speakerHint = 'system';
-                // Logging removed to reduce console noise.
             } else {
-                // When unmuted, distinguish based on volume.
                 speakerHint = systemLevel > micLevel * 2 ? 'system' : 'microphone';
             }
 
@@ -117,25 +150,22 @@ export async function startAudioProcessing(micId, onAudioData) {
             onAudioData(audioData, speakerHint);
         };
 
-        // 4. Connect both sources to the mixed processor with mute control
-        const micSource = audioContext.createMediaStreamSource(micStream);
+        // 5. Connect available sources
+        if (micStream) {
+            const micSource = audioContext.createMediaStreamSource(micStream);
+            micGainNode = audioContext.createGain();
+            updateMicGainNode();
+            muteManager.on('microphoneMuteChange', updateMicGainNode);
+            micSource.connect(micGainNode);
+            micGainNode.connect(mixedProcessor);
+        } else {
+            micGainNode = null;
+        }
+
         const systemSource = audioContext.createMediaStreamSource(systemStream);
-        
-        // Create gain node for microphone muting
-        micGainNode = audioContext.createGain();
-        updateMicGainNode(); // Set initial gain based on mute manager state
-        
-        // Listen for future changes
-        muteManager.on('microphoneMuteChange', updateMicGainNode);
-        
-        // Connect mic through gain node for mute control
-        micSource.connect(micGainNode);
-        micGainNode.connect(mixedProcessor);
-        
-        // System audio connects directly (we don't want to mute interviewer)
         systemSource.connect(mixedProcessor);
 
-        // Store the video track for screenshot reuse, but remove it from the stream
+        // Store the video track for screenshot reuse
         const videoTracks = systemStream.getVideoTracks();
         if (videoTracks.length > 0) {
             screenVideoTrack = videoTracks[0];
@@ -144,7 +174,7 @@ export async function startAudioProcessing(micId, onAudioData) {
             console.warn("⚠️ No video track found in display media stream");
         }
 
-        devLog("✅ Audio processing started successfully");
+        devLog(`✅ Audio processing started successfully (Microphone: ${micStream ? 'Connected' : 'Unavailable/Disabled'})`);
         return true;
 
     } catch (err) {

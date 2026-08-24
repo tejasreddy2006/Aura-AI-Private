@@ -438,10 +438,8 @@ export class ProviderManager {
     }
 
     checkAllSystemsGo() {
-        // Check all required systems
+        // REQUIRED checks (must be green to proceed)
         const requiredChecks = [
-            this.checks.micPermission,
-            this.checks.micSelection,
             this.checks.backend,
             this.checks.deepgram,
             this.checks.aiProvider
@@ -461,7 +459,7 @@ export class ProviderManager {
 
         const allChecks = [...requiredChecks, ...visibleOptionalChecks];
 
-        // Check if all systems are green
+        // Check if all required systems are green
         const allSystemsGo = allChecks.every(check => {
             if (!check) return false;
             const indicator = check.querySelector('.indicator');

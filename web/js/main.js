@@ -99,20 +99,32 @@ function handleOnboarding() {
 }
 
 async function runPreFlightChecks() {
-    // --- 1. Microphone Check ---
-    // First, ensure we have microphone permissions as this is a prerequisite.
+    // --- 1. Microphone Check (OPTIONAL) ---
     const micPermissionCheck = document.getElementById('check-mic-permission');
     const micSelectionCheck = document.getElementById('check-mic-selection');
 
-    providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'pending', 'Requesting Microphone...');
-    const micPermission = await setupMicrophone();
-    if (micPermission) {
-        providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'success', 'Microphone Permission OK');
-        providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'success', 'Microphone Selection Ready');
-    } else {
-        providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'error', 'Microphone Permission Denied');
-        providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'error', 'Microphone Selection Failed');
-        return;
+    if (micPermissionCheck && micSelectionCheck) {
+        providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'pending', 'Requesting Microphone...');
+        try {
+            const micResult = await setupMicrophone();
+            if (micResult && micResult.success) {
+                providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'success', 'Microphone Permission OK');
+                providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'success', 'Microphone Selection Ready');
+            } else if (micResult && micResult.reason === 'no_devices') {
+                providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'warning', 'Microphone (Optional / Not Available)');
+                providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'warning', 'Microphone (Optional / Not Available)');
+            } else if (micResult && micResult.reason === 'permission_denied') {
+                providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+                providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+            } else {
+                providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+                providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+            }
+        } catch (err) {
+            console.warn('Microphone setup exception handled gracefully:', err);
+            providerManager.webSocketHandler.updateCheckStatus(micPermissionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+            providerManager.webSocketHandler.updateCheckStatus(micSelectionCheck, 'warning', 'Microphone (Optional / Unavailable)');
+        }
     }
 
     // --- 2. Backend Connection and Session Establishment (NEW ASYNC FLOW) ---

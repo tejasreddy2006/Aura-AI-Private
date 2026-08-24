@@ -364,7 +364,7 @@ export class WebSocketHandler {
             node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ''
         );
         if (indicator) {
-            indicator.textContent = status === 'success' ? '🟢' : status === 'error' ? '🔴' : '⚪';
+            indicator.textContent = status === 'success' ? '🟢' : status === 'error' ? '🔴' : (status === 'warning' || status === 'optional') ? '🟡' : '⚪';
         }
         if (textNode) {
             textNode.nodeValue = ` ${text}`;
