@@ -204,6 +204,20 @@ async def verify_vision_ai_provider(request: ProviderVerifyRequest):
                 break
         
         if not model_config:
+            default_vm = provider_config.get("defaultVisionModel")
+            if default_vm:
+                for vision_model in vision_models:
+                    if isinstance(vision_model, str) and vision_model == default_vm:
+                        model_config = {"modelName": vision_model}
+                        break
+                    elif isinstance(vision_model, dict) and vision_model.get("modelName") == default_vm:
+                        model_config = vision_model
+                        break
+            if not model_config and vision_models:
+                first = vision_models[0]
+                model_config = {"modelName": first} if isinstance(first, str) else first
+
+        if not model_config:
             raise HTTPException(status_code=400, detail=f"Model '{request.model}' is not a vision model for '{request.name}'.")
 
         # Get all usable keys (blank/placeholder entries filtered out)

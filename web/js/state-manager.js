@@ -213,6 +213,19 @@ export class StateManager {
             return false;
         }
         
+        // If primary vision provider is not explicitly set, try to fall back to active primary AI provider if it supports vision
+        if (!this.appState.selectedVisionProvider.name || !this.appState.selectedVisionProvider.model) {
+            const primaryAiProvider = (this.appState.aiProviders || []).find(p => p.name === this.appState.selectedProvider.name);
+            if (primaryAiProvider && primaryAiProvider.supportsVision && primaryAiProvider.visionModels?.length > 0) {
+                const defaultModel = primaryAiProvider.defaultVisionModel || primaryAiProvider.visionModels[0];
+                const modelName = typeof defaultModel === 'string' ? defaultModel : defaultModel?.modelName;
+                this.appState.selectedVisionProvider = {
+                    name: primaryAiProvider.name,
+                    model: modelName
+                };
+            }
+        }
+
         if (!this.appState.selectedVisionProvider.name || !this.appState.selectedVisionProvider.model) {
             console.warn('⚠️ Vision mode requires a vision model to be configured');
             if (window.presetManager) {
@@ -226,10 +239,14 @@ export class StateManager {
         this.appState.visionMode.isActive = !this.appState.visionMode.isActive;
         
         if (this.appState.visionMode.isActive) {
-            const currentProvider = this.appState.visionMode.currentVisionProvider === 'primary' 
-                ? this.appState.selectedVisionProvider 
-                : this.appState.selectedSecondaryVisionProvider;
+            let currentProvider = this.appState.visionMode.currentVisionProvider === 'secondary'
+                ? this.appState.selectedSecondaryVisionProvider
+                : this.appState.selectedVisionProvider;
                 
+            if (!currentProvider || !currentProvider.name || !currentProvider.model) {
+                currentProvider = this.appState.selectedVisionProvider;
+            }
+
             screenshotService.setVisionConfig(currentProvider.name, currentProvider.model, this._visionMaxImages(currentProvider.name));
             screenshotService.setProgrammingLanguages(this.appState.selectedLanguages);
             screenshotService.showVisionMode(true);
@@ -277,33 +294,77 @@ export class StateManager {
             return false;
         }
 
-        if (!this.appState.selectedSecondaryVisionProvider || !this.appState.selectedSecondaryVisionProvider.name || !this.appState.selectedSecondaryVisionProvider.model) {
-            const msg = 'No secondary vision model configured.';
-            devWarn(msg, 'Please select one in the onboarding screen.');
-            if (window.presetManager) presetManager.showErrorNotification(msg, 'Please select one on the onboarding screen.');
+        // Build list of available vision candidates
+        const availableCandidates = [];
+        const seenKeys = new Set();
+
+        const addCandidate = (providerName, modelName, label) => {
+            if (!providerName || !modelName) return;
+            const key = `${providerName}::${modelName}`;
+            if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                availableCandidates.push({ name: providerName, model: modelName, label });
+            }
+        };
+
+        // 1. Configured Primary Vision Provider
+        if (this.appState.selectedVisionProvider?.name && this.appState.selectedVisionProvider?.model) {
+            addCandidate(this.appState.selectedVisionProvider.name, this.appState.selectedVisionProvider.model, 'Primary (1°)');
+        }
+
+        // 2. Configured Secondary Vision Provider
+        if (this.appState.selectedSecondaryVisionProvider?.name && this.appState.selectedSecondaryVisionProvider?.model) {
+            addCandidate(this.appState.selectedSecondaryVisionProvider.name, this.appState.selectedSecondaryVisionProvider.model, 'Secondary (2°)');
+        }
+
+        // 3. All other providers in aiProviders that support vision
+        (this.appState.aiProviders || []).forEach(p => {
+            if (p.supportsVision && p.visionModels?.length > 0) {
+                const defaultModel = p.defaultVisionModel || p.visionModels[0];
+                const modelName = typeof defaultModel === 'string' ? defaultModel : defaultModel?.modelName;
+                if (modelName) {
+                    addCandidate(p.name, modelName, p.name);
+                }
+            }
+        });
+
+        if (availableCandidates.length <= 1) {
+            const msg = 'No additional vision models available to switch to.';
+            devWarn(msg);
+            if (window.presetManager) presetManager.showErrorNotification(msg);
             return false;
         }
 
         this.appState.visionMode.lastSwitchTime = now;
 
-        const wasOnPrimary = this.appState.visionMode.currentVisionProvider === 'primary';
-        this.appState.visionMode.currentVisionProvider = wasOnPrimary ? 'secondary' : 'primary';
+        // Find current candidate index
+        const currentConfig = screenshotService.visionConfig;
+        let currentIndex = -1;
+        if (currentConfig && currentConfig.provider && currentConfig.model) {
+            currentIndex = availableCandidates.findIndex(c => c.name === currentConfig.provider && c.model === currentConfig.model);
+        }
 
-        const currentProviderConfig = wasOnPrimary
-            ? this.appState.selectedSecondaryVisionProvider
-            : this.appState.selectedVisionProvider;
+        const nextIndex = (currentIndex + 1) % availableCandidates.length;
+        const nextCandidate = availableCandidates[nextIndex];
 
-        screenshotService.setVisionConfig(currentProviderConfig.name, currentProviderConfig.model, this._visionMaxImages(currentProviderConfig.name));
+        // Update current vision provider state
+        if (nextCandidate.name === this.appState.selectedVisionProvider?.name) {
+            this.appState.visionMode.currentVisionProvider = 'primary';
+        } else if (nextCandidate.name === this.appState.selectedSecondaryVisionProvider?.name) {
+            this.appState.visionMode.currentVisionProvider = 'secondary';
+        } else {
+            this.appState.visionMode.currentVisionProvider = nextCandidate.name;
+        }
+
+        screenshotService.setVisionConfig(nextCandidate.name, nextCandidate.model, this._visionMaxImages(nextCandidate.name));
         screenshotService.updateQueueUI();
 
-        const providerType = wasOnPrimary ? 'Secondary (2°)' : 'Primary (1°)';
-        const message = `Switched to ${providerType} Vision Model: ${currentProviderConfig.model}`;
-        
+        const message = `Switched Vision Model: ${nextCandidate.name} (${nextCandidate.model})`;
         if (window.presetManager) {
             presetManager.showSuccessNotification(message);
         }
-        
-        devLog(`🔄 Switched to ${providerType} vision model:`, currentProviderConfig);
+
+        devLog(`🔄 Switched vision model to ${nextCandidate.name} (${nextCandidate.model})`);
         return true;
     }
 

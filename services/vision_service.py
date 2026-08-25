@@ -251,12 +251,30 @@ class VisionService:
 
     def _get_vision_model_config(self, provider_config: Dict[str, Any], model_identifier: str) -> Dict[str, Any]:
         """Finds vision model configuration, supporting both string and dict formats."""
-        for model in provider_config.get("visionModels", []):
+        vision_models = provider_config.get("visionModels", [])
+        if not vision_models:
+            raise ValueError(f"Provider '{provider_config.get('name')}' has no visionModels configured.")
+
+        for model in vision_models:
             if isinstance(model, str) and model == model_identifier:
-                return {"modelName": model}  # Normalize to dict
+                return {"modelName": model}
             if isinstance(model, dict) and model.get("modelName") == model_identifier:
                 return model
-        raise ValueError(f"Vision model '{model_identifier}' not found for provider '{provider_config['name']}'")
+
+        # Fallback 1: Check defaultVisionModel
+        default_vm = provider_config.get("defaultVisionModel")
+        if default_vm:
+            for model in vision_models:
+                if isinstance(model, str) and model == default_vm:
+                    return {"modelName": model}
+                if isinstance(model, dict) and model.get("modelName") == default_vm:
+                    return model
+
+        # Fallback 2: Return first vision model
+        first_model = vision_models[0]
+        if isinstance(first_model, str):
+            return {"modelName": first_model}
+        return first_model
     
     def get_vision_manager(self, provider_name: str, model_name: str) -> Optional[VisionManager]:
         """Get a specific vision manager, checking active providers first."""
